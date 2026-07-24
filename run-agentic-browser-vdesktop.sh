@@ -172,6 +172,7 @@ daemon() {
   write_state
   local x_pid=""
   local server_pid=""
+  local fit_guard_pid=""
 
   echo "Agentic browser virtual desktop"
   echo "Mode: $selected_mode"
@@ -230,6 +231,9 @@ daemon() {
     if [[ -n "$server_pid" ]]; then
       kill "$server_pid" >/dev/null 2>&1 || true
     fi
+    if [[ -n "$fit_guard_pid" ]]; then
+      kill "$fit_guard_pid" >/dev/null 2>&1 || true
+    fi
     kill_profile_processes
     if [[ -n "$x_pid" ]]; then
       kill "$x_pid" >/dev/null 2>&1 || true
@@ -246,6 +250,13 @@ daemon() {
 
   ./embedded_agentic_browser/run.sh &
   server_pid="$!"
+  if [[ "$selected_mode" != "headless" ]] && command -v xdotool >/dev/null 2>&1; then
+    ./scripts/autofit_chrome_window.sh \
+      --display "$DISPLAY_ID" \
+      --profile-dir "$PROFILE_DIR" \
+      >>"$LOG_DIR/window-fit.log" 2>&1 &
+    fit_guard_pid="$!"
+  fi
   wait "$server_pid"
 }
 
