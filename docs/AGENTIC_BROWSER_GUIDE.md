@@ -560,7 +560,7 @@ Current machine status observed during setup:
 
 - `Xephyr` is installed.
 - `google-chrome` is installed.
-- `Xvfb`, `x11vnc`, `websockify`, `noVNC`, `openbox`, and `fluxbox` were not
+- `Xvfb`, `x11vnc`, `websockify`, noVNC web assets, and `openbox` are
   installed.
 - This Xephyr build needs glamor for high-color nested rendering under XRDP.
   The launcher now defaults to `AGENTIC_VDESKTOP_XEPHYR_DEPTH=24` with
@@ -578,10 +578,44 @@ Custom ports/profile:
 
 ```bash
 AGENTIC_VDESKTOP_GUI_PORT=8795 \
-AGENTIC_VDESKTOP_BROWSER_PORT=9345 \
+AGENTIC_VDESKTOP_BROWSER_PORT=9355 \
 AGENTIC_VDESKTOP_PROFILE="$HOME/.cache/my-agentic-vdesktop" \
 ./run-agentic-browser-vdesktop.sh start
 ```
+
+Custom visible noVNC desktop with a fully separate CDP endpoint:
+
+```bash
+AGENTIC_VDESKTOP_SESSION=aginti-books-vdesktop \
+AGENTIC_VDESKTOP_MODE=xvfb \
+AGENTIC_VDESKTOP_DISPLAY=:79 \
+AGENTIC_VDESKTOP_GUI_PORT=8795 \
+AGENTIC_VDESKTOP_BROWSER_PORT=9355 \
+AGENTIC_VDESKTOP_VNC_PORT=5910 \
+AGENTIC_VDESKTOP_NOVNC_PORT=6100 \
+AGENTIC_VDESKTOP_PROFILE="$HOME/.cache/aginti-books-chrome" \
+./run-agentic-browser-vdesktop.sh start
+```
+
+Viewer:
+
+```text
+http://127.0.0.1:6100/vnc.html?host=127.0.0.1&port=6100&autoconnect=1&resize=scale
+```
+
+Create the profile once before starting:
+
+```bash
+scripts/fork_chrome_profile.sh \
+  --source "$HOME/.cache/xyq-chrome" \
+  --target "$HOME/.cache/aginti-books-chrome" \
+  --allow-live-source
+```
+
+The fork is independent; never point two Chrome processes at the same profile
+directory. Live-source copying is a best-effort snapshot used when stopping the
+source browser would disrupt work. Locks, caches, crash data, and downloadable
+browser models are excluded.
 
 Custom display/size:
 
@@ -606,6 +640,8 @@ Implementation details:
 - It starts the virtual display if needed.
 - It exports `DISPLAY` only inside that tmux session.
 - It starts `embedded_agentic_browser/run.sh` with isolated GUI/CDP ports.
+- When VNC and noVNC ports are set, it exposes the isolated display through
+  localhost-only `x11vnc` and `websockify`.
 - On stop, it also kills Chrome processes using the isolated profile directory.
 - For headless mode it exports:
   `EMBEDDED_AGENTIC_CHROME_ARGS="--headless=new --window-size=WIDTH,HEIGHT"`.

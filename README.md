@@ -152,6 +152,32 @@ Run the process-level agent without the GUI:
 | Xvfb | Fully off-screen X desktop when Xvfb is installed | `AGENTIC_VDESKTOP_MODE=xvfb ./run-agentic-browser-vdesktop.sh start` |
 | Direct | Local webapp and normal controlled Chrome profile | `./run-embedded-agentic-browser.sh` |
 
+## Isolated Profile Forks
+
+Do not run two Chrome processes against the same `--user-data-dir`. Create an
+independent snapshot when a task needs familiar browser state without sharing
+tabs, locks, history writes, or CDP endpoints:
+
+```bash
+scripts/fork_chrome_profile.sh \
+  --source "$HOME/.cache/xyq-chrome" \
+  --target "$HOME/.cache/aginti-books-chrome" \
+  --allow-live-source
+
+AGENTIC_VDESKTOP_SESSION=aginti-books-vdesktop \
+AGENTIC_VDESKTOP_MODE=xvfb \
+AGENTIC_VDESKTOP_DISPLAY=:79 \
+AGENTIC_VDESKTOP_GUI_PORT=8795 \
+AGENTIC_VDESKTOP_BROWSER_PORT=9355 \
+AGENTIC_VDESKTOP_VNC_PORT=5910 \
+AGENTIC_VDESKTOP_NOVNC_PORT=6100 \
+AGENTIC_VDESKTOP_PROFILE="$HOME/.cache/aginti-books-chrome" \
+./run-agentic-browser-vdesktop.sh start
+```
+
+This provides separate web UI, CDP, VNC, noVNC, X display, and profile state.
+The fork excludes volatile locks, caches, and downloadable browser models.
+
 ## Architecture
 
 ```text

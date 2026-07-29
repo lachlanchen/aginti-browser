@@ -13,6 +13,9 @@ XEPHYR_FALLBACK_DEPTH="${AGENTIC_VDESKTOP_XEPHYR_FALLBACK_DEPTH:-16/16}"
 XEPHYR_EXTRA_ARGS="${AGENTIC_VDESKTOP_XEPHYR_EXTRA_ARGS:--glamor}"
 GUI_PORT="${AGENTIC_VDESKTOP_GUI_PORT:-8794}"
 BROWSER_PORT="${AGENTIC_VDESKTOP_BROWSER_PORT:-9344}"
+VNC_PORT="${AGENTIC_VDESKTOP_VNC_PORT:-}"
+NOVNC_PORT="${AGENTIC_VDESKTOP_NOVNC_PORT:-}"
+NOVNC_WEB="${AGENTIC_VDESKTOP_NOVNC_WEB:-/usr/share/novnc}"
 PROFILE_DIR="${AGENTIC_VDESKTOP_PROFILE:-$HOME/.cache/agentic-browser-vdesktop-chrome}"
 MODEL="${AGENTIC_VDESKTOP_MODEL:-gpt-5.4-mini}"
 REASONING="${AGENTIC_VDESKTOP_REASONING:-low}"
@@ -35,9 +38,14 @@ Environment overrides:
   AGENTIC_VDESKTOP_XEPHYR_EXTRA_ARGS=$XEPHYR_EXTRA_ARGS
   AGENTIC_VDESKTOP_GUI_PORT=$GUI_PORT
   AGENTIC_VDESKTOP_BROWSER_PORT=$BROWSER_PORT
+  AGENTIC_VDESKTOP_VNC_PORT=PORT
+  AGENTIC_VDESKTOP_NOVNC_PORT=PORT
+  AGENTIC_VDESKTOP_NOVNC_WEB=$NOVNC_WEB
   AGENTIC_VDESKTOP_PROFILE=$PROFILE_DIR
   AGENTIC_VDESKTOP_MODEL=$MODEL
   AGENTIC_VDESKTOP_REASONING=$REASONING
+
+Set both VNC and noVNC ports to expose a localhost-only visible viewer.
 EOF
 }
 
@@ -57,6 +65,9 @@ write_state() {
     printf 'XEPHYR_EXTRA_ARGS=%q\n' "$XEPHYR_EXTRA_ARGS"
     printf 'GUI_PORT=%q\n' "$GUI_PORT"
     printf 'BROWSER_PORT=%q\n' "$BROWSER_PORT"
+    printf 'VNC_PORT=%q\n' "$VNC_PORT"
+    printf 'NOVNC_PORT=%q\n' "$NOVNC_PORT"
+    printf 'NOVNC_WEB=%q\n' "$NOVNC_WEB"
     printf 'PROFILE_DIR=%q\n' "$PROFILE_DIR"
     printf 'MODEL=%q\n' "$MODEL"
     printf 'REASONING=%q\n' "$REASONING"
@@ -126,6 +137,84 @@ kill_display_processes() {
   fi
 }
 
+remote_viewer_enabled() {
+  [[ -n "$VNC_PORT" && -n "$NOVNC_PORT" ]]
+}
+
+novnc_url() {
+  printf 'http://127.0.0.1:%s/vnc.html?host=127.0.0.1&port=%s&autoconnect=1&resize=scale\n' \
+    "$NOVNC_PORT" "$NOVNC_PORT"
+}
+
+start_remote_viewer() {
+  if [[ -z "$VNC_PORT" && -z "$NOVNC_PORT" ]]; then
+    return 0
+  fi
+  if ! remote_viewer_enabled; then
+    echo "Set both AGENTIC_VDESKTOP_VNC_PORT and AGENTIC_VDESKTOP_NOVNC_PORT." >&2
+    return 1
+  fi
+  if [[ "$MODE" == "headless" ]]; then
+    echo "noVNC requires xvfb or xephyr mode, not headless." >&2
+    return 1
+  fi
+  if [[ "$VNC_PORT" == "$NOVNC_PORT" ]]; then
+    echo "VNC and noVNC ports must be different." >&2
+    return 1
+  fi
+  if ! have x11vnc || ! have websockify; then
+    echo "x11vnc and websockify are required for noVNC mode." >&2
+    return 1
+  fi
+  if ss -ltn | awk '{print $4}' | grep -Eq "(^|:)${VNC_PORT}$|(^|:)${NOVNC_PORT}$"; then
+    echo "Configured VNC/noVNC port is already in use." >&2
+    return 1
+  fi
+
+  x11vnc \
+    -display "$DISPLAY_ID" \
+    -localhost \
+    -nopw \
+    -forever \
+    -shared \
+    -rfbport "$VNC_PORT" \
+    >>"$LOG_DIR/x11vnc.log" 2>&1 &
+  vnc_pid="$!"
+
+  websockify \
+    --web="$NOVNC_WEB" \
+    "127.0.0.1:$NOVNC_PORT" \
+    "127.0.0.1:$VNC_PORT" \
+    >>"$LOG_DIR/novnc.log" 2>&1 &
+  novnc_pid="$!"
+
+  local viewer_url
+  viewer_url="$(novnc_url)"
+  for _ in $(seq 1 30); do
+    if curl -fsS -o /dev/null "$viewer_url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  echo "noVNC did not become ready: $viewer_url" >&2
+  return 1
+}
+
+kill_remote_viewer_processes() {
+  local pids=""
+  if [[ -n "$VNC_PORT" ]]; then
+    pids+=" $(pgrep -f "x11vnc.*-rfbport ${VNC_PORT}( |$)" || true)"
+  fi
+  if [[ -n "$NOVNC_PORT" && -n "$VNC_PORT" ]]; then
+    pids+=" $(pgrep -f "websockify.*127\\.0\\.0\\.1:${NOVNC_PORT}.*127\\.0\\.0\\.1:${VNC_PORT}" || true)"
+  fi
+  pids="$(printf '%s\n' "$pids" | xargs)"
+  if [[ -n "$pids" ]]; then
+    # shellcheck disable=SC2086
+    kill $pids >/dev/null 2>&1 || true
+  fi
+}
+
 wait_for_service() {
   local url="http://127.0.0.1:$GUI_PORT/api/status"
   if ! have curl; then
@@ -173,12 +262,17 @@ daemon() {
   local x_pid=""
   local server_pid=""
   local fit_guard_pid=""
+  local vnc_pid=""
+  local novnc_pid=""
 
   echo "Agentic browser virtual desktop"
   echo "Mode: $selected_mode"
   echo "GUI: http://127.0.0.1:$GUI_PORT"
   echo "CDP: http://127.0.0.1:$BROWSER_PORT"
   echo "Profile: $PROFILE_DIR"
+  if remote_viewer_enabled; then
+    echo "noVNC: $(novnc_url)"
+  fi
   echo "Logs: $LOG_DIR"
 
   case "$selected_mode" in
@@ -234,12 +328,20 @@ daemon() {
     if [[ -n "$fit_guard_pid" ]]; then
       kill "$fit_guard_pid" >/dev/null 2>&1 || true
     fi
+    if [[ -n "$novnc_pid" ]]; then
+      kill "$novnc_pid" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "$vnc_pid" ]]; then
+      kill "$vnc_pid" >/dev/null 2>&1 || true
+    fi
     kill_profile_processes
     if [[ -n "$x_pid" ]]; then
       kill "$x_pid" >/dev/null 2>&1 || true
     fi
   }
   trap cleanup EXIT INT TERM
+
+  start_remote_viewer
 
   export EMBEDDED_AGENTIC_HOST=127.0.0.1
   export EMBEDDED_AGENTIC_PORT="$GUI_PORT"
@@ -269,8 +371,8 @@ start() {
   write_state
   local command
   printf -v command \
-    'AGENTIC_VDESKTOP_SESSION=%q AGENTIC_VDESKTOP_MODE=%q AGENTIC_VDESKTOP_DISPLAY=%q AGENTIC_VDESKTOP_GEOMETRY=%q AGENTIC_VDESKTOP_XEPHYR_DEPTH=%q AGENTIC_VDESKTOP_XEPHYR_FALLBACK_DEPTH=%q AGENTIC_VDESKTOP_XEPHYR_EXTRA_ARGS=%q AGENTIC_VDESKTOP_GUI_PORT=%q AGENTIC_VDESKTOP_BROWSER_PORT=%q AGENTIC_VDESKTOP_PROFILE=%q AGENTIC_VDESKTOP_MODEL=%q AGENTIC_VDESKTOP_REASONING=%q %q daemon' \
-    "$SESSION" "$MODE" "$DISPLAY_ID" "$GEOMETRY" "$XEPHYR_DEPTH" "$XEPHYR_FALLBACK_DEPTH" "$XEPHYR_EXTRA_ARGS" "$GUI_PORT" "$BROWSER_PORT" "$PROFILE_DIR" "$MODEL" "$REASONING" "$0"
+    'AGENTIC_VDESKTOP_SESSION=%q AGENTIC_VDESKTOP_MODE=%q AGENTIC_VDESKTOP_DISPLAY=%q AGENTIC_VDESKTOP_GEOMETRY=%q AGENTIC_VDESKTOP_XEPHYR_DEPTH=%q AGENTIC_VDESKTOP_XEPHYR_FALLBACK_DEPTH=%q AGENTIC_VDESKTOP_XEPHYR_EXTRA_ARGS=%q AGENTIC_VDESKTOP_GUI_PORT=%q AGENTIC_VDESKTOP_BROWSER_PORT=%q AGENTIC_VDESKTOP_VNC_PORT=%q AGENTIC_VDESKTOP_NOVNC_PORT=%q AGENTIC_VDESKTOP_NOVNC_WEB=%q AGENTIC_VDESKTOP_PROFILE=%q AGENTIC_VDESKTOP_MODEL=%q AGENTIC_VDESKTOP_REASONING=%q %q daemon' \
+    "$SESSION" "$MODE" "$DISPLAY_ID" "$GEOMETRY" "$XEPHYR_DEPTH" "$XEPHYR_FALLBACK_DEPTH" "$XEPHYR_EXTRA_ARGS" "$GUI_PORT" "$BROWSER_PORT" "$VNC_PORT" "$NOVNC_PORT" "$NOVNC_WEB" "$PROFILE_DIR" "$MODEL" "$REASONING" "$0"
   tmux new-session -d -s "$SESSION" "$command"
   wait_for_service
   "$0" status
@@ -279,6 +381,7 @@ start() {
 stop() {
   load_state
   tmux kill-session -t "$SESSION" >/dev/null 2>&1 || true
+  kill_remote_viewer_processes
   kill_profile_processes
   kill_display_processes "$DISPLAY_ID"
   rm -f "$STATE_FILE"
@@ -293,6 +396,10 @@ status() {
     echo "CDP: http://127.0.0.1:$BROWSER_PORT"
     echo "Mode: $MODE"
     echo "Display: $DISPLAY_ID"
+    if remote_viewer_enabled; then
+      echo "VNC: 127.0.0.1:$VNC_PORT"
+      echo "noVNC: $(novnc_url)"
+    fi
     echo "Logs: $LOG_DIR"
   else
     echo "Session: $SESSION not running"
