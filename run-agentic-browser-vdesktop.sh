@@ -142,7 +142,7 @@ remote_viewer_enabled() {
 }
 
 novnc_url() {
-  printf 'http://127.0.0.1:%s/vnc.html?host=127.0.0.1&port=%s&autoconnect=1&resize=scale&view_only=0&shared=1&reconnect=1\n' \
+  printf 'http://127.0.0.1:%s/vnc.html?host=127.0.0.1&port=%s&autoconnect=1&resize=scale&view_only=0&shared=0&reconnect=0\n' \
     "$NOVNC_PORT" "$NOVNC_PORT"
 }
 
@@ -176,7 +176,7 @@ start_remote_viewer() {
     -localhost \
     -nopw \
     -forever \
-    -shared \
+    -nevershared \
     -rfbport "$VNC_PORT" \
     >>"$LOG_DIR/x11vnc.log" 2>&1 &
   vnc_pid="$!"

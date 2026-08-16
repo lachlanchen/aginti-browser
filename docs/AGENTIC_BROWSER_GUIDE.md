@@ -600,7 +600,7 @@ AGENTIC_VDESKTOP_PROFILE="$HOME/.cache/aginti-books-chrome" \
 Viewer:
 
 ```text
-http://127.0.0.1:6100/vnc.html?host=127.0.0.1&port=6100&autoconnect=1&resize=scale&view_only=0&shared=1&reconnect=1
+http://127.0.0.1:6100/vnc.html?host=127.0.0.1&port=6100&autoconnect=1&resize=scale&view_only=0&shared=0&reconnect=0
 ```
 
 Create the profile once before starting:
@@ -642,11 +642,26 @@ Implementation details:
 - It starts `embedded_agentic_browser/run.sh` with isolated GUI/CDP ports.
 - When VNC and noVNC ports are set, it exposes the isolated display through
   localhost-only `x11vnc` and `websockify`.
+- The VNC server permits one interactive viewer. Opening a successor viewer
+  drops the stale client instead of sharing pointer state between tabs.
 - On stop, it also kills Chrome processes using the isolated profile directory.
 - For headless mode it exports:
   `EMBEDDED_AGENTIC_CHROME_ARGS="--headless=new --window-size=WIDTH,HEIGHT"`.
 - The Chrome driver reads `EMBEDDED_AGENTIC_CHROME_ARGS` and appends those flags
   when launching Chrome.
+
+### Host picker appears when clicking a remote tab
+
+If clicking a tab inside the remote Chrome opens the host desktop's `All Files`
+picker or Google AI/screenshot controls, the click did not reach the CDP
+browser. Cancel only that exact portal dialog, then check for simultaneous VNC
+clients. Close or disconnect obsolete `vnc_lite.html`/`resize=remote` viewers
+and retain one full `vnc.html` client. Do not restart Chrome or its profile.
+
+Confirm the diagnosis by checking that CDP still responds and that the intended
+target remains `document.visibilityState === "hidden"`. A direct RFB pointer
+probe can distinguish a healthy x11vnc input path from a stale viewer. Reopen
+the canonical URL above only after the old viewer connection is gone.
 
 ## Development Notes
 
