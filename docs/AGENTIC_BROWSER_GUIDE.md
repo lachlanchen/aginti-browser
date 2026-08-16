@@ -600,7 +600,7 @@ AGENTIC_VDESKTOP_PROFILE="$HOME/.cache/aginti-books-chrome" \
 Viewer:
 
 ```text
-http://127.0.0.1:6100/vnc.html?host=127.0.0.1&port=6100&autoconnect=1&resize=scale
+http://127.0.0.1:6100/vnc.html?host=127.0.0.1&port=6100&autoconnect=1&resize=scale&view_only=0&shared=1&reconnect=1
 ```
 
 Create the profile once before starting:

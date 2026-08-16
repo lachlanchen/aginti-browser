@@ -142,7 +142,7 @@ remote_viewer_enabled() {
 }
 
 novnc_url() {
-  printf 'http://127.0.0.1:%s/vnc.html?host=127.0.0.1&port=%s&autoconnect=1&resize=scale\n' \
+  printf 'http://127.0.0.1:%s/vnc.html?host=127.0.0.1&port=%s&autoconnect=1&resize=scale&view_only=0&shared=1&reconnect=1\n' \
     "$NOVNC_PORT" "$NOVNC_PORT"
 }
 
